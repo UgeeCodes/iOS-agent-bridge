@@ -20,6 +20,8 @@
   },
   "devDependencies": {
     "@types/node": "^26.4.0",
+    "appium": "^3.7.0",
+    "appium-xcuitest-driver": "^12.9.1",
     "tsx": "^4.23.13",
     "typescript": "^7.0.2"
   }

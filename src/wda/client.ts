@@ -70,6 +70,23 @@ export class WDAClient {
     return { baseUrl, sessionId: id };
   }
 
+  /** Run an operation with the active session, retrying once if session expired (404) */
+  private async withSession<T>(
+    fn: (baseUrl: string, sessionId: string) => Promise<T>,
+  ): Promise<T> {
+    const { baseUrl, sessionId } = await this.ensureSession();
+    try {
+      return await fn(baseUrl, sessionId);
+    } catch (err: any) {
+      if (err?.response?.status === 404) {
+        this.sessionId = null;
+        const fresh = await this.ensureSession();
+        return await fn(fresh.baseUrl, fresh.sessionId);
+      }
+      throw err;
+    }
+  }
+
   async getStatus() {
     const baseUrl = await this.getActiveBaseUrl();
     const response = await axios.get(`${baseUrl}/status`);
@@ -77,34 +94,37 @@ export class WDAClient {
   }
 
   async getTree() {
-    const { baseUrl, sessionId } = await this.ensureSession();
-    const response = await axios.get(`${baseUrl}/session/${sessionId}/source`, {
-      params: { format: "json" },
+    return this.withSession(async (baseUrl, sessionId) => {
+      const response = await axios.get(
+        `${baseUrl}/session/${sessionId}/source`,
+        { params: { format: "json" } },
+      );
+      return response.data;
     });
-    return response.data;
   }
 
   async tap(x: number, y: number) {
-    const { baseUrl, sessionId } = await this.ensureSession();
-    const response = await axios.post(
-      `${baseUrl}/session/${sessionId}/actions`,
-      {
-        actions: [
-          {
-            type: "pointer",
-            id: "finger1",
-            parameters: { pointerType: "touch" },
-            actions: [
-              { type: "pointerMove", duration: 0, x, y },
-              { type: "pointerDown", button: 0 },
-              { type: "pause", duration: 100 },
-              { type: "pointerUp", button: 0 },
-            ],
-          },
-        ],
-      },
-    );
-    return response.data;
+    return this.withSession(async (baseUrl, sessionId) => {
+      const response = await axios.post(
+        `${baseUrl}/session/${sessionId}/actions`,
+        {
+          actions: [
+            {
+              type: "pointer",
+              id: "finger1",
+              parameters: { pointerType: "touch" },
+              actions: [
+                { type: "pointerMove", duration: 0, x, y },
+                { type: "pointerDown", button: 0 },
+                { type: "pause", duration: 100 },
+                { type: "pointerUp", button: 0 },
+              ],
+            },
+          ],
+        },
+      );
+      return response.data;
+    });
   }
 
   async swipe(
@@ -114,46 +134,48 @@ export class WDAClient {
     endY: number,
     durationMs = 300,
   ) {
-    const { baseUrl, sessionId } = await this.ensureSession();
-    const response = await axios.post(
-      `${baseUrl}/session/${sessionId}/actions`,
-      {
-        actions: [
-          {
-            type: "pointer",
-            id: "finger1",
-            parameters: { pointerType: "touch" },
-            actions: [
-              {
-                type: "pointerMove",
-                duration: 0,
-                x: Math.round(startX),
-                y: Math.round(startY),
-              },
-              { type: "pointerDown", button: 0 },
-              { type: "pause", duration: 100 },
-              {
-                type: "pointerMove",
-                duration: durationMs,
-                x: Math.round(endX),
-                y: Math.round(endY),
-              },
-              { type: "pointerUp", button: 0 },
-            ],
-          },
-        ],
-      },
-    );
-    return response.data;
+    return this.withSession(async (baseUrl, sessionId) => {
+      const response = await axios.post(
+        `${baseUrl}/session/${sessionId}/actions`,
+        {
+          actions: [
+            {
+              type: "pointer",
+              id: "finger1",
+              parameters: { pointerType: "touch" },
+              actions: [
+                {
+                  type: "pointerMove",
+                  duration: 0,
+                  x: Math.round(startX),
+                  y: Math.round(startY),
+                },
+                { type: "pointerDown", button: 0 },
+                { type: "pause", duration: 100 },
+                {
+                  type: "pointerMove",
+                  duration: durationMs,
+                  x: Math.round(endX),
+                  y: Math.round(endY),
+                },
+                { type: "pointerUp", button: 0 },
+              ],
+            },
+          ],
+        },
+      );
+      return response.data;
+    });
   }
 
   async type(text: string) {
-    const { baseUrl, sessionId } = await this.ensureSession();
-    const response = await axios.post(
-      `${baseUrl}/session/${sessionId}/wda/keys`,
-      { value: [...text] },
-    );
-    return response.data;
+    return this.withSession(async (baseUrl, sessionId) => {
+      const response = await axios.post(
+        `${baseUrl}/session/${sessionId}/wda/keys`,
+        { value: [...text] },
+      );
+      return response.data;
+    });
   }
 
   async getScreenshot(): Promise<string> {
@@ -169,12 +191,43 @@ export class WDAClient {
     height: number;
     scale: number;
   }> {
-    const { baseUrl, sessionId } = await this.ensureSession();
-    const response = await axios.get(
-      `${baseUrl}/session/${sessionId}/window/size`,
-    );
-    const { width, height } = response.data?.value ?? response.data;
-    // WDA doesn't return scale directly; default to 3x for modern iPhones
-    return { width, height, scale: 3 };
+    return this.withSession(async (baseUrl, sessionId) => {
+      const response = await axios.get(
+        `${baseUrl}/session/${sessionId}/window/size`,
+      );
+      const { width, height } = response.data?.value ?? response.data;
+      // WDA doesn't return scale directly; default to 3x for modern iPhones
+      return { width, height, scale: 3 };
+    });
+  }
+
+  resetSession(): void {
+    this.sessionId = null;
+  }
+
+  async isLocked(): Promise<boolean> {
+    const baseUrl = await this.getActiveBaseUrl();
+    const response = await axios.get(`${baseUrl}/wda/locked`);
+    return Boolean(response.data?.value);
+  }
+
+  async unlock(): Promise<void> {
+    const baseUrl = await this.getActiveBaseUrl();
+    await axios.post(`${baseUrl}/wda/unlock`);
+  }
+
+  async lock(): Promise<void> {
+    const baseUrl = await this.getActiveBaseUrl();
+    await axios.post(`${baseUrl}/wda/lock`);
+  }
+
+  async getActiveApp(): Promise<{ bundleId: string; pid: number }> {
+    const baseUrl = await this.getActiveBaseUrl();
+    const response = await axios.get(`${baseUrl}/wda/activeAppInfo`);
+    const val = response.data?.value ?? response.data;
+    return {
+      bundleId: val?.bundleId ?? "",
+      pid: val?.pid ?? 0,
+    };
   }
 }

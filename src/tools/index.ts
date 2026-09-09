@@ -6,6 +6,11 @@ import {
 import { WDAClient } from "../wda/client.js";
 import { parseXCUIElementTree } from "../wda/parser.js";
 import { screenshot } from "../wda/screenshot.js";
+import {
+  ensureHealthy,
+  ensureUnlocked,
+  unlockWithPasscode,
+} from "../wda/device.js";
 
 export function registerToolHandlers(server: Server, wda: WDAClient) {
   const elementCache = new Map<
@@ -14,8 +19,19 @@ export function registerToolHandlers(server: Server, wda: WDAClient) {
   >();
 
   async function handleStatus() {
-    const status = await wda.getStatus();
-    return textResult(JSON.stringify(status, null, 2));
+    const [status, locked] = await Promise.all([
+      wda.getStatus().catch((e) => ({ error: String(e) })),
+      wda.isLocked().catch(() => "unknown"),
+    ]);
+    return textResult(
+      JSON.stringify(
+        typeof status === "object" && status !== null
+          ? { ...status, deviceLocked: locked }
+          : { status, deviceLocked: locked },
+        null,
+        2,
+      ),
+    );
   }
 
   async function handleSnapshot() {
@@ -166,6 +182,14 @@ export function registerToolHandlers(server: Server, wda: WDAClient) {
     };
   }
 
+  async function handleUnlock(args: ToolArguments) {
+    const passcode =
+      typeof args.passcode === "string" ? args.passcode : undefined;
+    const result = await unlockWithPasscode(wda, passcode);
+    elementCache.clear();
+    return textResult(result);
+  }
+
   const handlers: Record<string, ToolHandler> = {
     get_status: handleStatus,
     ui_snapshot: handleSnapshot,
@@ -173,6 +197,7 @@ export function registerToolHandlers(server: Server, wda: WDAClient) {
     ui_swipe: handleSwipe,
     ui_type: handleType,
     ui_screenshot: handleScreenshot,
+    ui_unlock: handleUnlock,
   };
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
@@ -184,6 +209,21 @@ export function registerToolHandlers(server: Server, wda: WDAClient) {
         inputSchema: {
           type: "object",
           properties: {},
+          additionalProperties: false,
+        },
+      },
+      {
+        name: "ui_unlock",
+        description:
+          "Unlock the iPhone with an optional passcode. If passcode is omitted, uses IPHONE_MCP_PASSCODE from the environment or performs a wake/swipe unlock on passcode-free devices.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            passcode: {
+              type: "string",
+              description: "Optional 4-10 digit device passcode.",
+            },
+          },
           additionalProperties: false,
         },
       },

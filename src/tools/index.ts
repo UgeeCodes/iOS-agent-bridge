@@ -34,12 +34,24 @@ export function registerToolHandlers(server: Server, wda: WDAClient) {
     );
   }
 
-  async function handleSnapshot() {
+  async function handleSnapshot(args: ToolArguments) {
+    const query =
+      typeof args.query === "string" && args.query.trim().length > 0
+        ? args.query.trim().toLowerCase()
+        : undefined;
+
+    const maxNodes =
+      typeof args.max_nodes === "number" && args.max_nodes >= 10
+        ? Math.min(Math.floor(args.max_nodes), 600)
+        : 250;
+
+    const includeOffscreen = Boolean(args.include_offscreen);
+
     const tree = await wda.getTree();
-    const elements = parseXCUIElementTree(tree);
+    const allElements = parseXCUIElementTree(tree, { includeOffscreen });
 
     elementCache.clear();
-    for (const element of elements) {
+    for (const element of allElements) {
       elementCache.set(element.ref, {
         x: element.x,
         y: element.y,
@@ -48,16 +60,46 @@ export function registerToolHandlers(server: Server, wda: WDAClient) {
       });
     }
 
-    const outline = elements.map((element) => {
+    let displayed = allElements;
+    if (query) {
+      displayed = allElements.filter(
+        (el) =>
+          el.ref.toLowerCase().includes(query) ||
+          el.type.toLowerCase().includes(query) ||
+          (el.label && el.label.toLowerCase().includes(query)) ||
+          (el.value && el.value.toLowerCase().includes(query)),
+      );
+    }
+
+    const totalMatching = displayed.length;
+    const capped = displayed.slice(0, maxNodes);
+
+    const outline = capped.map((element) => {
       const label = element.label ? ` "${element.label}"` : "";
       const value = element.value ? ` value="${element.value}"` : "";
       return `[${element.ref}] ${element.type}${label}${value} @${element.x},${element.y}`;
     });
 
+    let header = `Screen Elements (${capped.length}`;
+    if (totalMatching > capped.length) {
+      header += ` of ${totalMatching} matching, capped at ${maxNodes}`;
+    }
+    header += `):`;
+
+    if (query) {
+      header = `Filtered Screen Elements matching "${query}" (${capped.length}`;
+      if (totalMatching > capped.length) {
+        header += ` of ${totalMatching}, capped at ${maxNodes}`;
+      }
+      header += `):`;
+    }
+
     return textResult(
       outline.length > 0
-        ? `Screen Elements:\n${outline.join("\n")}`
-        : "No visible screen elements found.",
+        ? `${header}\n${outline.join("\n")}`
+        : query
+          ? `No screen elements matched query "${query}".`
+          : "No visible screen elements found.",
     );
   }
 
@@ -76,6 +118,22 @@ export function registerToolHandlers(server: Server, wda: WDAClient) {
     elementCache.clear();
     return textResult(
       `Tapped ${ref} at (${coordinates.x}, ${coordinates.y}). Run ui_snapshot to see the updated screen.`,
+    );
+  }
+
+  async function handleTapPoint(args: ToolArguments) {
+    const x = args.x;
+    const y = args.y;
+    if (typeof x !== "number" || typeof y !== "number") {
+      throw new Error(
+        "ui_tap_point requires numeric x and y coordinates in points.",
+      );
+    }
+
+    await wda.tap(Math.round(x), Math.round(y));
+    elementCache.clear();
+    return textResult(
+      `Tapped point (${Math.round(x)}, ${Math.round(y)}) in points. Run ui_snapshot to see the updated screen.`,
     );
   }
 
@@ -161,8 +219,24 @@ export function registerToolHandlers(server: Server, wda: WDAClient) {
       throw new Error("ui_type requires a text string.");
     }
 
-    await wda.type(text);
-    return textResult("Text entered successfully.");
+    if (typeof args.ref === "string") {
+      const coordinates = elementCache.get(args.ref);
+      if (!coordinates) {
+        throw new Error(`Ref ${args.ref} not found. Run ui_snapshot first.`);
+      }
+      await wda.tap(coordinates.x, coordinates.y);
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+
+    const payload = args.submit === true ? `${text}\n` : text;
+    await wda.type(payload);
+    elementCache.clear();
+
+    const target = typeof args.ref === "string" ? ` into ${args.ref}` : "";
+    const submitted = args.submit === true ? " and submitted" : "";
+    return textResult(
+      `Typed${target}${submitted}. Run ui_snapshot to see the updated screen.`,
+    );
   }
 
   async function handleScreenshot() {
@@ -194,6 +268,7 @@ export function registerToolHandlers(server: Server, wda: WDAClient) {
     get_status: handleStatus,
     ui_snapshot: handleSnapshot,
     ui_tap: handleTap,
+    ui_tap_point: handleTapPoint,
     ui_swipe: handleSwipe,
     ui_type: handleType,
     ui_screenshot: handleScreenshot,
@@ -230,10 +305,31 @@ export function registerToolHandlers(server: Server, wda: WDAClient) {
       {
         name: "ui_snapshot",
         description:
-          "Get a compact outline of visible elements on the current iPhone screen. Returns temporary refs for use with ui_tap.",
+          "THE primary way to see the screen. Returns a compact outline of every actionable element " +
+          "with a stable ref like [e12]. Act on refs with ui_tap/ui_type — do not guess coordinates. " +
+          "Refs are invalidated by the next snapshot. Use `query` to filter a busy screen.",
         inputSchema: {
           type: "object",
-          properties: {},
+          properties: {
+            query: {
+              type: "string",
+              description:
+                "Case-insensitive filter over element label/value/type, e.g. 'send' or 'Cell'.",
+            },
+            max_nodes: {
+              type: "integer",
+              minimum: 10,
+              maximum: 600,
+              default: 250,
+              description: "Maximum number of nodes to return (default 250).",
+            },
+            include_offscreen: {
+              type: "boolean",
+              default: false,
+              description:
+                "Include elements outside the visible screen (other pages, below the fold).",
+            },
+          },
           additionalProperties: false,
         },
       },
@@ -250,6 +346,26 @@ export function registerToolHandlers(server: Server, wda: WDAClient) {
             },
           },
           required: ["ref"],
+          additionalProperties: false,
+        },
+      },
+      {
+        name: "ui_tap_point",
+        description:
+          "Escape hatch: tap an absolute point in POINTS (not pixels). Only use when an element has no accessibility entry — prefer ui_tap with a ref.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            x: {
+              type: "number",
+              description: "X coordinate in screen points.",
+            },
+            y: {
+              type: "number",
+              description: "Y coordinate in screen points.",
+            },
+          },
+          required: ["x", "y"],
           additionalProperties: false,
         },
       },
@@ -286,13 +402,26 @@ export function registerToolHandlers(server: Server, wda: WDAClient) {
       },
       {
         name: "ui_type",
-        description: "Type text into the currently focused iPhone element.",
+        description:
+          "Type into a text field. Pass `ref` to tap that field first (recommended), or omit to type " +
+          "into whatever already has focus. Use submit=true to press return afterwards.",
         inputSchema: {
           type: "object",
           properties: {
             text: {
               type: "string",
-              description: "Text to enter into the focused element.",
+              description: "Text to enter into the text field.",
+            },
+            ref: {
+              type: "string",
+              description:
+                "Optional element ref from ui_snapshot to focus before typing.",
+            },
+            submit: {
+              type: "boolean",
+              default: false,
+              description:
+                "Whether to press Return/Enter after typing the text (e.g. to submit a search or send).",
             },
           },
           required: ["text"],
@@ -302,7 +431,9 @@ export function registerToolHandlers(server: Server, wda: WDAClient) {
       {
         name: "ui_screenshot",
         description:
-          "Capture an image screenshot of the current iPhone screen.",
+          "A picture of the current screen. Use when the accessibility tree is not enough — custom-drawn " +
+          "UI, images, games, or verifying something looks right. For deciding what to tap, ui_snapshot " +
+          "is better. NOTE: tap coordinates are in points, not image pixels.",
         inputSchema: {
           type: "object",
           properties: {},

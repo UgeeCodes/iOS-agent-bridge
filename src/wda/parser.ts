@@ -21,13 +21,26 @@ const INTERACTIVE_TYPES = new Set([
   "StaticText",
 ]);
 
-export function parseXCUIElementTree(response: unknown): SnapshotElement[] {
+export interface ParseOptions {
+  includeOffscreen?: boolean;
+  screenWidth?: number;
+  screenHeight?: number;
+}
+
+export function parseXCUIElementTree(
+  response: unknown,
+  options?: ParseOptions,
+): SnapshotElement[] {
   const elements: SnapshotElement[] = [];
-  visitNode(unwrapTree(response), elements);
+  visitNode(unwrapTree(response), elements, options);
   return elements;
 }
 
-function visitNode(node: unknown, elements: SnapshotElement[]): void {
+function visitNode(
+  node: unknown,
+  elements: SnapshotElement[],
+  options?: ParseOptions,
+): void {
   if (!isRecord(node)) return;
 
   const rect = parseRect(node.rect);
@@ -36,8 +49,10 @@ function visitNode(node: unknown, elements: SnapshotElement[]): void {
   const value = stringValue(node.value);
   const hasContent = Boolean(label || value);
 
+  const visible = options?.includeOffscreen ? true : isVisible(node);
+
   if (
-    isVisible(node) &&
+    visible &&
     rect &&
     rect.width > 0 &&
     rect.height > 0 &&
@@ -58,7 +73,7 @@ function visitNode(node: unknown, elements: SnapshotElement[]): void {
 
   if (Array.isArray(node.children)) {
     for (const child of node.children) {
-      visitNode(child, elements);
+      visitNode(child, elements, options);
     }
   }
 }

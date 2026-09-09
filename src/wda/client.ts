@@ -118,7 +118,23 @@ export class WDAClient {
 
   async getScreenshot(): Promise<string> {
     const baseUrl = await this.getActiveBaseUrl();
-    const response = await axios.get(`${baseUrl}/screenshot`);
+    const response = await axios.get(`${baseUrl}/screenshot`, {
+      timeout: 30_000,
+    });
     return response.data?.value ?? response.data;
+  }
+
+  async getWindowSize(): Promise<{
+    width: number;
+    height: number;
+    scale: number;
+  }> {
+    const { baseUrl, sessionId } = await this.ensureSession();
+    const response = await axios.get(
+      `${baseUrl}/session/${sessionId}/window/size`,
+    );
+    const { width, height } = response.data?.value ?? response.data;
+    // WDA doesn't return scale directly; default to 3x for modern iPhones
+    return { width, height, scale: 3 };
   }
 }

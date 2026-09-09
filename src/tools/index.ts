@@ -5,6 +5,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { WDAClient } from "../wda/client.js";
 import { parseXCUIElementTree } from "../wda/parser.js";
+import { screenshot } from "../wda/screenshot.js";
 
 export function registerToolHandlers(server: Server, wda: WDAClient) {
   const elementCache = new Map<string, { x: number; y: number }>();
@@ -65,13 +66,17 @@ export function registerToolHandlers(server: Server, wda: WDAClient) {
   }
 
   async function handleScreenshot() {
-    const base64 = await wda.getScreenshot();
+    const result = await screenshot(wda);
     return {
       content: [
         {
           type: "image" as const,
-          data: base64,
+          data: result.base64,
           mimeType: "image/png",
+        },
+        {
+          type: "text" as const,
+          text: result.note,
         },
       ],
     };

@@ -1,19 +1,63 @@
 import axios from "axios";
+import { execSync } from "child_process";
+
+function detectCoreDeviceIp(): string | null {
+  try {
+    const out = execSync("lsof -i -P -n 2>/dev/null | grep -i Xcode", {
+      encoding: "utf8",
+    });
+    const match = out.match(/->\[([0-9a-fA-F:]+)\]:\d+/);
+    if (match) return match[1];
+  } catch {}
+  return null;
+}
 
 export class WDAClient {
   private baseUrl: string;
   private sessionId: string | null = null;
 
   constructor(baseUrl?: string) {
-    this.baseUrl =
-      baseUrl ?? process.env.WDA_BASE_URL ?? "http://127.0.0.1:8100";
+    if (baseUrl) {
+      this.baseUrl = baseUrl;
+    } else if (process.env.WDA_BASE_URL) {
+      this.baseUrl = process.env.WDA_BASE_URL;
+    } else {
+      const autoIp = detectCoreDeviceIp();
+      this.baseUrl = autoIp
+        ? `http://[${autoIp}]:8100`
+        : "http://127.0.0.1:8100";
+    }
+  }
+
+  /** Refresh or resolve the base URL dynamically if the current address is unreachable */
+  private async getActiveBaseUrl(): Promise<string> {
+    try {
+      await axios.get(`${this.baseUrl}/status`, { timeout: 2000 });
+      return this.baseUrl;
+    } catch {
+      const detected = detectCoreDeviceIp();
+      if (detected) {
+        const candidate = `http://[${detected}]:8100`;
+        try {
+          await axios.get(`${candidate}/status`, { timeout: 2000 });
+          this.baseUrl = candidate;
+          this.sessionId = null; // Reset session for new connection
+          return this.baseUrl;
+        } catch {}
+      }
+      return this.baseUrl;
+    }
   }
 
   /** Ensure a WDA session exists, creating one if needed. */
-  private async ensureSession(): Promise<string> {
-    if (this.sessionId) return this.sessionId;
+  private async ensureSession(): Promise<{
+    baseUrl: string;
+    sessionId: string;
+  }> {
+    const baseUrl = await this.getActiveBaseUrl();
+    if (this.sessionId) return { baseUrl, sessionId: this.sessionId };
 
-    const response = await axios.post(`${this.baseUrl}/session`, {
+    const response = await axios.post(`${baseUrl}/session`, {
       capabilities: {},
     });
 
@@ -23,27 +67,27 @@ export class WDAClient {
     }
 
     this.sessionId = id;
-    return id;
+    return { baseUrl, sessionId: id };
   }
 
   async getStatus() {
-    const response = await axios.get(`${this.baseUrl}/status`);
+    const baseUrl = await this.getActiveBaseUrl();
+    const response = await axios.get(`${baseUrl}/status`);
     return response.data;
   }
 
   async getTree() {
-    const sessionId = await this.ensureSession();
-    const response = await axios.get(
-      `${this.baseUrl}/session/${sessionId}/source`,
-      { params: { format: "json" } },
-    );
+    const { baseUrl, sessionId } = await this.ensureSession();
+    const response = await axios.get(`${baseUrl}/session/${sessionId}/source`, {
+      params: { format: "json" },
+    });
     return response.data;
   }
 
   async tap(x: number, y: number) {
-    const sessionId = await this.ensureSession();
+    const { baseUrl, sessionId } = await this.ensureSession();
     const response = await axios.post(
-      `${this.baseUrl}/session/${sessionId}/actions`,
+      `${baseUrl}/session/${sessionId}/actions`,
       {
         actions: [
           {
@@ -64,11 +108,17 @@ export class WDAClient {
   }
 
   async type(text: string) {
-    const sessionId = await this.ensureSession();
+    const { baseUrl, sessionId } = await this.ensureSession();
     const response = await axios.post(
-      `${this.baseUrl}/session/${sessionId}/wda/keys`,
+      `${baseUrl}/session/${sessionId}/wda/keys`,
       { value: [...text] },
     );
     return response.data;
+  }
+
+  async getScreenshot(): Promise<string> {
+    const baseUrl = await this.getActiveBaseUrl();
+    const response = await axios.get(`${baseUrl}/screenshot`);
+    return response.data?.value ?? response.data;
   }
 }

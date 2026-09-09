@@ -64,11 +64,25 @@ export function registerToolHandlers(server: Server, wda: WDAClient) {
     return textResult("Text entered successfully.");
   }
 
+  async function handleScreenshot() {
+    const base64 = await wda.getScreenshot();
+    return {
+      content: [
+        {
+          type: "image" as const,
+          data: base64,
+          mimeType: "image/png",
+        },
+      ],
+    };
+  }
+
   const handlers: Record<string, ToolHandler> = {
     get_status: handleStatus,
     ui_snapshot: handleSnapshot,
     ui_tap: handleTap,
     ui_type: handleType,
+    ui_screenshot: handleScreenshot,
   };
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
@@ -124,6 +138,16 @@ export function registerToolHandlers(server: Server, wda: WDAClient) {
           additionalProperties: false,
         },
       },
+      {
+        name: "ui_screenshot",
+        description:
+          "Capture an image screenshot of the current iPhone screen.",
+        inputSchema: {
+          type: "object",
+          properties: {},
+          additionalProperties: false,
+        },
+      },
     ],
   }));
 
@@ -140,10 +164,15 @@ export function registerToolHandlers(server: Server, wda: WDAClient) {
 }
 
 type ToolArguments = Record<string, unknown>;
-type ToolHandler = (args: ToolArguments) => Promise<TextResult>;
-type TextResult = ReturnType<typeof textResult>;
+type ToolResult = {
+  content: Array<
+    | { type: "text"; text: string }
+    | { type: "image"; data: string; mimeType: string }
+  >;
+};
+type ToolHandler = (args: ToolArguments) => Promise<ToolResult>;
 
-function textResult(text: string) {
+function textResult(text: string): ToolResult {
   return {
     content: [{ type: "text" as const, text }],
   };

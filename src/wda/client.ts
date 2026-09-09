@@ -107,6 +107,46 @@ export class WDAClient {
     return response.data;
   }
 
+  async swipe(
+    startX: number,
+    startY: number,
+    endX: number,
+    endY: number,
+    durationMs = 300,
+  ) {
+    const { baseUrl, sessionId } = await this.ensureSession();
+    const response = await axios.post(
+      `${baseUrl}/session/${sessionId}/actions`,
+      {
+        actions: [
+          {
+            type: "pointer",
+            id: "finger1",
+            parameters: { pointerType: "touch" },
+            actions: [
+              {
+                type: "pointerMove",
+                duration: 0,
+                x: Math.round(startX),
+                y: Math.round(startY),
+              },
+              { type: "pointerDown", button: 0 },
+              { type: "pause", duration: 100 },
+              {
+                type: "pointerMove",
+                duration: durationMs,
+                x: Math.round(endX),
+                y: Math.round(endY),
+              },
+              { type: "pointerUp", button: 0 },
+            ],
+          },
+        ],
+      },
+    );
+    return response.data;
+  }
+
   async type(text: string) {
     const { baseUrl, sessionId } = await this.ensureSession();
     const response = await axios.post(

@@ -8,7 +8,10 @@ import { parseXCUIElementTree } from "../wda/parser.js";
 import { screenshot } from "../wda/screenshot.js";
 
 export function registerToolHandlers(server: Server, wda: WDAClient) {
-  const elementCache = new Map<string, { x: number; y: number }>();
+  const elementCache = new Map<
+    string,
+    { x: number; y: number; width: number; height: number }
+  >();
 
   async function handleStatus() {
     const status = await wda.getStatus();
@@ -21,7 +24,12 @@ export function registerToolHandlers(server: Server, wda: WDAClient) {
 
     elementCache.clear();
     for (const element of elements) {
-      elementCache.set(element.ref, { x: element.x, y: element.y });
+      elementCache.set(element.ref, {
+        x: element.x,
+        y: element.y,
+        width: element.width,
+        height: element.height,
+      });
     }
 
     const outline = elements.map((element) => {
@@ -52,6 +60,82 @@ export function registerToolHandlers(server: Server, wda: WDAClient) {
     elementCache.clear();
     return textResult(
       `Tapped ${ref} at (${coordinates.x}, ${coordinates.y}). Run ui_snapshot to see the updated screen.`,
+    );
+  }
+
+  async function handleSwipe(args: ToolArguments) {
+    const direction = args.direction;
+    if (
+      typeof direction !== "string" ||
+      !["up", "down", "left", "right"].includes(direction)
+    ) {
+      throw new Error(
+        "ui_swipe requires a direction: 'up', 'down', 'left', or 'right'.",
+      );
+    }
+
+    const times =
+      typeof args.times === "number" && args.times > 0
+        ? Math.min(Math.floor(args.times), 10)
+        : 1;
+
+    let cx: number;
+    let cy: number;
+    let deltaX: number;
+    let deltaY: number;
+
+    if (typeof args.ref === "string") {
+      const el = elementCache.get(args.ref);
+      if (!el) {
+        throw new Error(`Ref ${args.ref} not found. Run ui_snapshot first.`);
+      }
+      cx = el.x;
+      cy = el.y;
+      deltaX = Math.max(Math.min(el.width * 0.35, 200), 20);
+      deltaY = Math.max(Math.min(el.height * 0.35, 200), 20);
+    } else {
+      const win = await wda.getWindowSize();
+      cx = Math.round(win.width / 2);
+      cy = Math.round(win.height / 2);
+      deltaX = Math.round(win.width * 0.35);
+      deltaY = Math.round(win.height * 0.3);
+    }
+
+    let startX = cx;
+    let startY = cy;
+    let endX = cx;
+    let endY = cy;
+
+    switch (direction) {
+      case "up":
+        startY = cy + deltaY;
+        endY = cy - deltaY;
+        break;
+      case "down":
+        startY = cy - deltaY;
+        endY = cy + deltaY;
+        break;
+      case "left":
+        startX = cx + deltaX;
+        endX = cx - deltaX;
+        break;
+      case "right":
+        startX = cx - deltaX;
+        endX = cx + deltaX;
+        break;
+    }
+
+    for (let i = 0; i < times; i++) {
+      await wda.swipe(startX, startY, endX, endY);
+      if (i < times - 1) {
+        await new Promise((resolve) => setTimeout(resolve, 300));
+      }
+    }
+
+    elementCache.clear();
+    const scope = typeof args.ref === "string" ? ` on ${args.ref}` : "";
+    return textResult(
+      `Swiped ${direction}${scope} (${times}x). Run ui_snapshot to see the updated screen.`,
     );
   }
 
@@ -86,6 +170,7 @@ export function registerToolHandlers(server: Server, wda: WDAClient) {
     get_status: handleStatus,
     ui_snapshot: handleSnapshot,
     ui_tap: handleTap,
+    ui_swipe: handleSwipe,
     ui_type: handleType,
     ui_screenshot: handleScreenshot,
   };
@@ -125,6 +210,37 @@ export function registerToolHandlers(server: Server, wda: WDAClient) {
             },
           },
           required: ["ref"],
+          additionalProperties: false,
+        },
+      },
+      {
+        name: "ui_swipe",
+        description:
+          "Swipe in a direction. `direction` is the way the FINGER moves: 'up' scrolls further down a " +
+          "page, 'left' moves to the next home screen page. Optionally scope to a scrollable element " +
+          "with `ref`, and repeat with `times`.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            direction: {
+              type: "string",
+              enum: ["up", "down", "left", "right"],
+              description:
+                "The direction the finger moves: 'up' (scroll down), 'down' (scroll up), 'left' (swipe next), 'right' (swipe previous).",
+            },
+            ref: {
+              type: "string",
+              description:
+                "Optional element ref from ui_snapshot to scope the swipe within.",
+            },
+            times: {
+              type: "integer",
+              minimum: 1,
+              maximum: 10,
+              description: "Number of times to repeat the swipe (default 1).",
+            },
+          },
+          required: ["direction"],
           additionalProperties: false,
         },
       },

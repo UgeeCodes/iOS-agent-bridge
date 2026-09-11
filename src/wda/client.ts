@@ -127,6 +127,35 @@ export class WDAClient {
     });
   }
 
+  async touchAndHold(x: number, y: number, durationMs = 1200) {
+    return this.withSession(async (baseUrl, sessionId) => {
+      const response = await axios.post(
+        `${baseUrl}/session/${sessionId}/actions`,
+        {
+          actions: [
+            {
+              type: "pointer",
+              id: "finger1",
+              parameters: { pointerType: "touch" },
+              actions: [
+                {
+                  type: "pointerMove",
+                  duration: 0,
+                  x: Math.round(x),
+                  y: Math.round(y),
+                },
+                { type: "pointerDown", button: 0 },
+                { type: "pause", duration: durationMs },
+                { type: "pointerUp", button: 0 },
+              ],
+            },
+          ],
+        },
+      );
+      return response.data;
+    });
+  }
+
   async swipe(
     startX: number,
     startY: number,

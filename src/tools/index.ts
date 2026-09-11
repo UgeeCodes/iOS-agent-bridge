@@ -273,6 +273,43 @@ export function registerToolHandlers(server: Server, wda: WDAClient) {
     },
   });
 
+  const uiLongPress = defineTool({
+    name: "ui_long_press",
+    description:
+      "Press and hold an element — opens iOS context menus, enters home screen edit mode, etc.",
+    schema: z.object({
+      ref: z
+        .string()
+        .describe("Element ref from ui_snapshot, such as e1 or e2."),
+      ms: z
+        .int()
+        .min(300)
+        .max(5000)
+        .optional()
+        .describe("Duration to hold in milliseconds (default 1200)."),
+      snapshot_after: z
+        .boolean()
+        .optional()
+        .describe("Return a ui_snapshot immediately after the action."),
+    }),
+    handler: async ({ ref, ms, snapshot_after }) => {
+      const coordinates = elementCache.get(ref);
+      if (!coordinates) {
+        return errorResult(`Ref ${ref} not found. Run ui_snapshot first.`);
+      }
+
+      const durationMs = ms ?? 1200;
+      await wda.touchAndHold(coordinates.x, coordinates.y, durationMs);
+      elementCache.clear();
+      return maybeSnapshot(
+        textResult(
+          `Long pressed ${ref} for ${durationMs}ms at (${coordinates.x}, ${coordinates.y}). Run ui_snapshot to see the updated screen.`,
+        ),
+        snapshot_after ?? false,
+      );
+    },
+  });
+
   const uiSwipe = defineTool({
     name: "ui_swipe",
     description:
@@ -441,21 +478,41 @@ export function registerToolHandlers(server: Server, wda: WDAClient) {
     },
   });
 
-  const uiUnlock = defineTool({
-    name: "ui_unlock",
+  const deviceLock = defineTool({
+    name: "device_lock",
     description:
-      "Unlock the iPhone with an optional passcode. If passcode is omitted, uses IPHONE_MCP_PASSCODE from the environment or performs a wake/swipe unlock on passcode-free devices.",
+      "Lock the phone, or wake and unlock it. If the device has a passcode, it is typed on the " +
+      "on-screen keypad — set IPHONE_MCP_PASSCODE in the server env so it need not be passed here. " +
+      "Face ID cannot be triggered programmatically.",
     schema: z.object({
+      action: z
+        .enum(["lock", "unlock", "status"])
+        .describe(
+          "Whether to lock the screen, wake and unlock it, or check lock status.",
+        ),
       passcode: z
         .string()
         .optional()
-        .describe("Optional 4-10 digit device passcode."),
+        .describe(
+          "Optional 4-10 digit passcode. Omit to use IPHONE_MCP_PASSCODE from the environment.",
+        ),
       snapshot_after: z
         .boolean()
         .optional()
         .describe("Return a ui_snapshot immediately after unlocking."),
     }),
-    handler: async ({ passcode, snapshot_after }) => {
+    handler: async ({ action, passcode, snapshot_after }) => {
+      if (action === "lock") {
+        await wda.lock();
+        elementCache.clear();
+        return textResult("Device locked.");
+      }
+
+      if (action === "status") {
+        const locked = await wda.isLocked().catch(() => "unknown");
+        return textResult(JSON.stringify({ deviceLocked: locked }, null, 2));
+      }
+
       const result = await unlockWithPasscode(wda, passcode);
       elementCache.clear();
       return maybeSnapshot(textResult(result), snapshot_after ?? false);
@@ -500,11 +557,12 @@ export function registerToolHandlers(server: Server, wda: WDAClient) {
     // Action
     uiTap,
     uiTapPoint,
+    uiLongPress,
     uiSwipe,
     uiType,
     // Device
     deviceStatus,
-    uiUnlock,
+    deviceLock,
     devicePressButton,
   ] as ToolDef<z.ZodObject>[];
 

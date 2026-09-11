@@ -191,3 +191,9 @@ You can open apps by bundle ID or using built-in aliases:
 - **Session 404 error**: iOS kills active XCTest sessions when the phone locks. iOS Agent Bridge automatically detects 404 session expiry and provisions a fresh session on the next call.
 - **Passcode screen not unlocking**: Ensure `IPHONE_MCP_PASSCODE` matches your device passcode in `.env`.
 - **WDA runner exits**: Re-run `bash scripts/wda-up.sh` to restart the runner. If certificates expired after 7 days (free developer account), run with `FORCE_BUILD=1 bash scripts/wda-up.sh`.
+
+---
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).

@@ -130,14 +130,14 @@ Add the server to your MCP client config (e.g. `claude_desktop_config.json`, `.g
 
 All mutating tools accept an optional `snapshot_after: true` parameter to immediately return an updated screen outline in the same turn.
 
-### 📱 Observation
+### Observation
 
 | Tool            | Description                                                                                                                                                              |
 | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `ui_snapshot`   | **The primary tool**. Returns a compact outline of actionable elements with ref tags (`[e1]`, `[e2]`). Supports `query` filtering, `max_nodes`, and `include_offscreen`. |
 | `ui_screenshot` | Captures a downscaled PNG image of the screen for visual inspection or non-standard canvas UIs.                                                                          |
 
-### 👆 Action
+### Action
 
 | Tool            | Description                                                                                                            |
 | --------------- | ---------------------------------------------------------------------------------------------------------------------- |
@@ -147,7 +147,7 @@ All mutating tools accept an optional `snapshot_after: true` parameter to immedi
 | `ui_swipe`      | Directional swipe (`up`, `down`, `left`, `right`). Supports scoping to a container `ref` and repeating with `times`.   |
 | `ui_type`       | Type text into the focused field, or pass `ref` to auto-focus before typing. Set `submit: true` to press Return/Enter. |
 
-### ⚙️ Device
+### Device
 
 | Tool                  | Description                                                                                                                                                  |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |

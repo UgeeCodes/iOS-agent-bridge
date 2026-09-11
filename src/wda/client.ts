@@ -260,6 +260,16 @@ export class WDAClient {
     };
   }
 
+  async launchApp(bundleId: string): Promise<any> {
+    return this.withSession(async (baseUrl, sessionId) => {
+      const response = await axios.post(
+        `${baseUrl}/session/${sessionId}/wda/apps/launch`,
+        { bundleId },
+      );
+      return response.data;
+    });
+  }
+
   async pressButton(name: "home" | "volumeup" | "volumedown") {
     const baseUrl = await this.getActiveBaseUrl();
     const response = await axios.post(`${baseUrl}/wda/pressButton`, { name });

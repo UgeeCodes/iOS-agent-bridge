@@ -457,23 +457,80 @@ export function registerToolHandlers(server: Server, wda: WDAClient) {
 
   // ─── Device Tools ────────────────────────────────────────────────────────
 
+  const COMMON_APP_ALIASES: Record<string, string> = {
+    messages: "com.apple.MobileSMS",
+    sms: "com.apple.MobileSMS",
+    safari: "com.apple.mobilesafari",
+    settings: "com.apple.Preferences",
+    photos: "com.apple.mobileslideshow",
+    camera: "com.apple.camera",
+    maps: "com.apple.Maps",
+    notes: "com.apple.mobilenotes",
+    calendar: "com.apple.mobilecal",
+    reminders: "com.apple.reminders",
+    music: "com.apple.Music",
+    mail: "com.apple.mobilemail",
+    phone: "com.apple.mobilephone",
+    clock: "com.apple.mobiletimer",
+    appstore: "com.apple.AppStore",
+    files: "com.apple.DocumentsApp",
+    calculator: "com.apple.calculator",
+    weather: "com.apple.weather",
+    contacts: "com.apple.MobileAddressBook",
+  };
+
   const deviceStatus = defineTool({
     name: "device_status",
-    description: "Check connectivity to the iOS device WebDriverAgent runner.",
+    description:
+      "Check connectivity to the iOS device WebDriverAgent runner, screen lock state, and foreground app.",
     schema: z.object({}),
     handler: async () => {
-      const [status, locked] = await Promise.all([
+      const [status, locked, activeApp] = await Promise.all([
         wda.getStatus().catch((e) => ({ error: String(e) })),
         wda.isLocked().catch(() => "unknown"),
+        wda.getActiveApp().catch(() => ({ bundleId: "unknown", pid: 0 })),
       ]);
       return textResult(
         JSON.stringify(
           typeof status === "object" && status !== null
-            ? { ...status, deviceLocked: locked }
-            : { status, deviceLocked: locked },
+            ? { ...status, deviceLocked: locked, activeApp }
+            : { status, deviceLocked: locked, activeApp },
           null,
           2,
         ),
+      );
+    },
+  });
+
+  const deviceOpenApp = defineTool({
+    name: "device_open_app",
+    description:
+      "Open an iOS app by bundle ID (e.g. 'com.apple.MobileSMS') or common name " +
+      "('messages', 'safari', 'settings', 'notes', 'photos', 'camera', 'maps', etc.).",
+    schema: z.object({
+      bundle_id: z
+        .string()
+        .describe(
+          "Bundle identifier (e.g. 'com.apple.MobileSMS') or common name ('messages', 'safari', 'settings').",
+        ),
+      snapshot_after: z
+        .boolean()
+        .optional()
+        .describe("Return a ui_snapshot immediately after launching the app."),
+    }),
+    handler: async ({ bundle_id, snapshot_after }) => {
+      const normalized = bundle_id.trim().toLowerCase();
+      const targetBundleId = COMMON_APP_ALIASES[normalized] ?? bundle_id.trim();
+
+      await wda.launchApp(targetBundleId);
+      elementCache.clear();
+      await new Promise((resolve) => setTimeout(resolve, 800));
+
+      return maybeSnapshot(
+        textResult(
+          `Launched app "${targetBundleId}". Run ui_snapshot to see the updated screen.`,
+        ),
+        snapshot_after ?? false,
       );
     },
   });
@@ -562,6 +619,7 @@ export function registerToolHandlers(server: Server, wda: WDAClient) {
     uiType,
     // Device
     deviceStatus,
+    deviceOpenApp,
     deviceLock,
     devicePressButton,
   ] as ToolDef<z.ZodObject>[];

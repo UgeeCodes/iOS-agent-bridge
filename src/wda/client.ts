@@ -230,4 +230,10 @@ export class WDAClient {
       pid: val?.pid ?? 0,
     };
   }
+
+  async pressButton(name: "home" | "volumeup" | "volumedown") {
+    const baseUrl = await this.getActiveBaseUrl();
+    const response = await axios.post(`${baseUrl}/wda/pressButton`, { name });
+    return response.data;
+  }
 }

@@ -196,4 +196,4 @@ You can open apps by bundle ID or using built-in aliases:
 
 ## License
 
-This project is licensed under the [MIT License](LICENSE).
+Licensed under the [MIT License](LICENSE).
